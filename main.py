@@ -9,6 +9,9 @@ owner = "getify"
 repo = "You-Dont-Know-JS"
 branch = ''
 sha = ''
+file_tree_json = ''
+file_tree = []
+file_stack = []
 
 #Getting Branch Name
 if DEFAULT_FLAG:
@@ -19,6 +22,7 @@ if DEFAULT_FLAG:
     else:
         print('Error')
 
+#Getting SHA for the branch of this repo
 url = f"https://api.github.com/repos/{owner}/{repo}/branches/{branch}"
 response = requests.get(url)
 if response.status_code == 200:
@@ -26,15 +30,51 @@ if response.status_code == 200:
 else:
     print("Error")
 
+#Getting the git tree for the branch of this repo
 url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{sha}?recursive=1"
 response = requests.get(url)
 if response.status_code == 200:
-    data = response.json()
-
-    with open("output.json", "w") as file:
-        json.dump(data, file, indent=3)
+    file_tree_json = response.json()['tree']
 else:
     print("Error")
+
+#Making File Tree
+for item in file_tree_json:
+    while len(file_stack) != 0:
+        #match folder strings until match is found or no match
+        folder_match_string = "/".join(file_stack) + "/"
+        folder_match_string_len = len(folder_match_string)
+        #to ensure no indexing errors
+        if folder_match_string_len > len(item['path']):
+            file_stack.pop(-1)
+            continue
+        else:
+            #match found, append accordingly
+            if folder_match_string == item['path'][:folder_match_string_len]:
+                ref_list = file_tree
+                for i in range(len(file_stack)):
+                    ref_list = ref_list[-1]
+                if item["type"] == 'tree':
+                    ref_list.append([item['path'][folder_match_string_len:]])
+                    file_stack.append(item['path'][folder_match_string_len:])
+                elif item["type"] == "blob":
+                    ref_list.append(item['path'][folder_match_string_len:])
+                break
+            #no match, try one level up
+            else:
+                file_stack.pop(-1)
+                continue
+    #this is not a nested file/folder, append to main list
+    if len(file_stack) == 0:
+        if item["type"] == 'tree':
+            file_tree.append([item['path']])
+            file_stack.append(item['path'])
+        elif item["type"] == "blob":
+            file_tree.append(item['path'])
+
+print(file_tree)
+
+
 
 #TO IMPLEMENT
 
@@ -53,6 +93,21 @@ else:
 #use a BFS tree for file/folder list
 #use DFS tree for going through the files and folders
 #sort such that the files come first and the folders later
+
+#tree parsing:
+#if tree add it as a list with one item, also add tree name to a stack
+#if blob encountered:
+    #if tree stack empty, append to list
+    #if tree stack not empty, check prefix of blob
+        #check prefix iteratively
+            #check all items in the stack first, then less than less
+            #keep the stuff that match, pop the rest
+                #after popping, maybe rearrange such that blobs come before trees?
+            #index deep enough into the list (e.g. match 3 means index 3 deep)
+            #add to that list
+#append to list as tuples (blob_name, "blob"), ("tree_name", "tree")
+
+#exception handling, folder with no files
 
 #obtain file contents with title - just use raw.github (need to handle notebooks though)
 
