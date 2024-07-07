@@ -2,6 +2,7 @@
 
 import requests
 import json
+import copy
 
 DEFAULT_FLAG = True
 
@@ -9,9 +10,9 @@ owner = "getify"
 repo = "You-Dont-Know-JS"
 branch = ''
 sha = ''
-file_tree_json = ''
-file_tree = []
-file_stack = []
+repo_tree_json = ''
+repo_tree = {}
+folder_stack = []
 
 #Getting Branch Name
 if DEFAULT_FLAG:
@@ -34,46 +35,91 @@ else:
 url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{sha}?recursive=1"
 response = requests.get(url)
 if response.status_code == 200:
-    file_tree_json = response.json()['tree']
+    repo_tree_json = response.json()['tree']
 else:
     print("Error")
 
-#Making File Tree
-for item in file_tree_json:
-    while len(file_stack) != 0:
+
+#Making Repo Tree
+for item in repo_tree_json:
+    while len(folder_stack) != 0:
         #match folder strings until match is found or no match
-        folder_match_string = "/".join(file_stack) + "/"
+        folder_match_string = "/".join(folder_stack) + "/"
         folder_match_string_len = len(folder_match_string)
         #to ensure no indexing errors
         if folder_match_string_len > len(item['path']):
-            file_stack.pop(-1)
+            folder_stack.pop()
             continue
         else:
             #match found, append accordingly
             if folder_match_string == item['path'][:folder_match_string_len]:
-                ref_list = file_tree
-                for i in range(len(file_stack)):
-                    ref_list = ref_list[-1]
+                ref_dict = repo_tree
+                for folder in folder_stack:
+                    ref_dict = ref_dict[folder]
                 if item["type"] == 'tree':
-                    ref_list.append([item['path'][folder_match_string_len:]])
-                    file_stack.append(item['path'][folder_match_string_len:])
+                    ref_dict[item['path'][folder_match_string_len:]] = {}
+                    folder_stack.append(item['path'][folder_match_string_len:])
                 elif item["type"] == "blob":
-                    ref_list.append(item['path'][folder_match_string_len:])
+                    ref_dict[item['path'][folder_match_string_len:]] = item['path']
                 break
             #no match, try one level up
             else:
-                file_stack.pop(-1)
+                folder_stack.pop()
                 continue
     #this is not a nested file/folder, append to main list
-    if len(file_stack) == 0:
+    if len(folder_stack) == 0:
         if item["type"] == 'tree':
-            file_tree.append([item['path']])
-            file_stack.append(item['path'])
+            repo_tree[item['path']] = {}
+            folder_stack.append(item['path'])
         elif item["type"] == "blob":
-            file_tree.append(item['path'])
+            repo_tree[item['path']] = item['path']
 
-print(file_tree)
+output_text = ""
+folder_stack_2 = [('Repo', [])]
 
+#Parse Tree to Output Text
+#DFS using Stack
+while folder_stack_2:
+    f, f_tree = folder_stack_2.pop()
+    ref_tree = repo_tree
+    file_list = []
+    folder_list = []
+    output_text += f"{f} files and folders:\n\n"
+    #go in to subtree
+    for i in f_tree:
+        ref_tree = ref_tree[i]
+    #iterate through subtree
+    for k, v in ref_tree.items():
+        if isinstance(v, dict):
+            folder_list.append(k)
+        else:
+            file_list.append(k)
+    output_text += "File names: " + ", ".join(file_list) + "\n"
+    output_text += "Folder names: " + ", ".join(folder_list) + "\n\n"
+    #nodes to visit
+    for i in reversed(folder_list):
+        if f_tree:
+            f_tree_copy = copy.deepcopy(f_tree)
+            f_tree_copy.append(i)
+            folder_stack_2.append((i, f_tree_copy))
+        else:
+            folder_stack_2.append((i, [i]))
+
+print(output_text)
+
+
+#what to do if file list is empty
+#what to do if folder list is empty
+
+#iterate through them separately (parallelized gets for the files)
+
+#Next steps: Organize in files then folders, attach the api request link
+#exception and error handling
+#make it a CLI that can accept arguments etc.
+#then do the GETs, and parallelize them
+#then do the handlers for the markdown and ipynb file types
+#handle private repos
+#testing
 
 
 #TO IMPLEMENT
