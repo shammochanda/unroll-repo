@@ -3,6 +3,8 @@
 import requests
 import json
 import copy
+import asyncio
+import aiohttp
 
 DEFAULT_FLAG = True
 
@@ -13,6 +15,66 @@ sha = ''
 repo_tree_json = ''
 repo_tree = {}
 folder_stack = []
+image_extensions = ['.tif', '.tiff', '.bmp', '.jpg', 
+                    '.jpeg', '.gif', '.png', '.eps', 
+                    '.raw', '.cr2', '.nef', '.orf',
+                    '.sr2', '.psd', '.xcf', '.ai',
+                    '.cdr', '.apng', '.avif', '.jfif',
+                    '.pjpeg', '.pjp', '.png', '.svg',
+                    '.webp', '.ico', '.cur']
+
+video_extensions = ['.webm', '.mkv', '.flv', '.vob',
+                    '.ogv', '.ogg', '.drc', '.gifv',
+                    '.mng', '.avi', '.mts', '.m2ts',
+                    '.ts', '.mov', '.qt', '.wmv',
+                    '.yuv', '.rm', '.rmvb', '.viv',
+                    '.asf', '.amv', '.mp4', '.m4p',
+                    '.m4v', '.mpg', '.mp2', '.mpeg',
+                    '.mpe', '.mpv', '.m2v', '.svi',
+                    '.3gp', '.3g2', '.mxf', '.roq',
+                    '.nsv', '.f4v', '.f4p', '.f4a',
+                    '.f4b']
+
+audio_extensions = ['.aa', '.aac', '.aax', '.act',
+                    '.aiff', '.alac', '.amr', '.ape',
+                    '.au', '.awb', '.dss', '.dvf',
+                    '.flac', '.gsm', '.iklax', '.ivs',
+                    '.m4a', '.m4b', '.mmf', '.movpkg', 
+                    '.mp3', '.mpc', '.msv', '.nmf',
+                    '.ogg', '.oga', '.mogg', '.opus',
+                    '.ra', '.rm', '.raw', '.rf64',
+                    '.sln', '.tta', '.voc', '.vox',
+                    '.wav', '.wma', '.wv', '.webm',
+                    '.8svx', '.cda']
+
+def is_image_audio_video(file_path_name):
+    for i_ext in image_extensions:
+        if file_path_name[0-len(i_ext):].lower() == i_ext:
+            return True
+    for v_ext in video_extensions:
+        if file_path_name[0-len(v_ext):].lower() == v_ext:
+            return True
+    for a_ext in audio_extensions:
+        if file_path_name[0-len(a_ext):].lower() == a_ext:
+            return True
+    return False
+
+#async request and action
+async def fetch_file(session, file_url):
+    if is_image_audio_video(file_url):
+        return "This is an Image/Audio/Video File\n\n\n"
+    
+    async with session.get(file_url) as response:
+        if response.status == 200:
+            return await(response.text()) + '\n\n\n'
+        else:
+            return "Unable to access File\n\n\n"
+
+#create async http session and asynchronously get file contents
+async def fetch_files(file_urls):
+    async with aiohttp.ClientSession() as session:
+        to_fetch = [fetch_file(session, file_url) for file_url in file_urls]
+        return await asyncio.gather(*to_fetch)
 
 #Getting Branch Name
 if DEFAULT_FLAG:
@@ -94,30 +156,40 @@ while folder_stack_2:
             folder_list.append(k)
         else:
             file_list.append(k)
-    output_text += "File names: " + ", ".join(file_list) + "\n"
-    output_text += "Folder names: " + ", ".join(folder_list) + "\n\n"
+    output_text += "File names: " + (", ".join(file_list) if file_list else "No Files Here")  + "\n"
+    output_text += "Folder names: " + (", ".join(folder_list) if folder_list else "No Folders Here") + "\n\n"
+    #Add File Contents
+    file_path_list = []
+    file_url_list = []
+    for file in file_list:
+        file_path = ref_tree[file]
+        content_url = f"https://raw.githubusercontent.com/{owner}/{repo}/2nd-ed/{file_path}"
+        # content_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{file_path}"
+        file_path_list.append(file_path + ":\n\n")
+        file_url_list.append(content_url)
+    #get file contents
+    file_content_list = asyncio.run(fetch_files(file_url_list))
+    for i in range(len(file_path_list)):
+        output_text += file_path_list[i]
+        output_text += file_content_list[i]
     #nodes to visit
     for i in reversed(folder_list):
-        if f_tree:
-            f_tree_copy = copy.deepcopy(f_tree)
-            f_tree_copy.append(i)
-            folder_stack_2.append((i, f_tree_copy))
-        else:
-            folder_stack_2.append((i, [i]))
+        f_tree_copy = copy.deepcopy(f_tree)
+        f_tree_copy.append(i)
+        folder_stack_2.append(("/".join(f_tree_copy), f_tree_copy))
 
 print(output_text)
 
 
-#what to do if file list is empty
-#what to do if folder list is empty
+#for private repos, use github API
+#for public repos use raw github
 
-#iterate through them separately (parallelized gets for the files)
-
-#Next steps: Organize in files then folders, attach the api request link
-#exception and error handling
+#Next steps: #exception and error handling
 #make it a CLI that can accept arguments etc.
-#then do the GETs, and parallelize them
+#maybe ignore all video and image files for now
 #then do the handlers for the markdown and ipynb file types
+    #ipynb is essentially json
+    #ipynb images are in png converted to base64 (need to convert back)
 #handle private repos
 #testing
 
@@ -140,24 +212,7 @@ print(output_text)
 #use DFS tree for going through the files and folders
 #sort such that the files come first and the folders later
 
-#tree parsing:
-#if tree add it as a list with one item, also add tree name to a stack
-#if blob encountered:
-    #if tree stack empty, append to list
-    #if tree stack not empty, check prefix of blob
-        #check prefix iteratively
-            #check all items in the stack first, then less than less
-            #keep the stuff that match, pop the rest
-                #after popping, maybe rearrange such that blobs come before trees?
-            #index deep enough into the list (e.g. match 3 means index 3 deep)
-            #add to that list
-#append to list as tuples (blob_name, "blob"), ("tree_name", "tree")
-
 #exception handling, folder with no files
-
-#obtain file contents with title - just use raw.github (need to handle notebooks though)
-
-#parallelized GETS instead of sequential
 
 #notebook handler (as well as notebook images)
     #notebook images are pngs (need to decode)
@@ -173,16 +228,6 @@ print(output_text)
 #callable program with arguments
 #e.g. unroll_repo -git link, unroll_repo -git -n(for names) owner repo_name
 #e.g. unroll_repo directory_name (local)
-
-#recursively breakdown files and folders in this format:
-#Repo files and folders: folder1, folder2, file1, file2
-#file1: gap and then file1 contents
-#file2: gap and then file2 contents
-#folder1 files and folders: etc. etc.
-#folder1/file1: gap and then folder1/file1 contents
-#exhaustively go through folder1
-#folder2 files and folders: etc. etc.
-#folder2/file1: gap and then folder2/file1 contents 
 
 
 
