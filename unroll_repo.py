@@ -5,11 +5,13 @@ import json
 import copy
 import asyncio
 import aiohttp
+import argparse
+import sys
 
-DEFAULT_FLAG = True
+DEFAULT_BRANCH_FLAG = True
 
-owner = "getify"
-repo = "You-Dont-Know-JS"
+owner = ""
+repo = ""
 branch = ''
 sha = ''
 repo_tree_json = ''
@@ -47,6 +49,21 @@ audio_extensions = ['.aa', '.aac', '.aax', '.act',
                     '.wav', '.wma', '.wv', '.webm',
                     '.8svx', '.cda']
 
+parser = argparse.ArgumentParser()
+
+parser.add_argument("owner", nargs=1, help="Owner of Repo to Unroll")
+parser.add_argument("name", nargs=1, help="Name of Repo to Unroll")
+parser.add_argument("-b", "--branch", nargs=1, help="Name of Specific Branch")
+
+args = parser.parse_args()
+
+owner = args.owner[0]
+repo = args.name[0]
+
+if args.branch:
+    branch = args.branch[0]
+    DEFAULT_BRANCH_FLAG = False
+
 def is_image_audio_video(file_path_name):
     for i_ext in image_extensions:
         if file_path_name[0-len(i_ext):].lower() == i_ext:
@@ -59,6 +76,31 @@ def is_image_audio_video(file_path_name):
             return True
     return False
 
+#parse python notebooks
+def handle_ipynb(file_json):
+    output_text = ""
+    file_contents = file_json["cells"]
+    for cell in file_contents:
+        cell_type = cell["cell_type"].title()
+        output_text += f"Cell Type: {cell_type}\n\n"
+        output_text += "Cell Source:\n\n" + "".join(cell["source"]) + "\n\n"
+        #parse cell outputs
+        if cell_type == "Code":
+            output_text += "Cell Output:\n\n"
+            if cell["outputs"]:
+                for output in cell["outputs"]:
+                    output_type = output["output_type"]
+                    if output_type == "stream":
+                        output_text += "".join(output["text"]) + "\n"
+                    elif output_type == "execute_result":
+                        output_text += "".join(output["data"]["text/plain"]) + "\n\n"
+                    elif output_type == "display_data":
+                        output_text += "Image Outputted\n\n" + "".join(output["data"]["text/plain"]) + "\n\n"
+            else:
+                "No Cell Output\n\n"
+    return output_text
+
+
 #async request and action
 async def fetch_file(session, file_url):
     if is_image_audio_video(file_url):
@@ -66,7 +108,13 @@ async def fetch_file(session, file_url):
     
     async with session.get(file_url) as response:
         if response.status == 200:
-            return await(response.text()) + '\n\n\n'
+            #check ipynb here
+            if file_url[-6:] == ".ipynb":
+                file_json = await(response.json(content_type=None))
+                file_contents = handle_ipynb(file_json)
+                return file_contents + "\n\n\n"
+            else:
+                return await(response.text()) + '\n\n'
         else:
             return "Unable to access File\n\n\n"
 
@@ -77,13 +125,13 @@ async def fetch_files(file_urls):
         return await asyncio.gather(*to_fetch)
 
 #Getting Branch Name
-if DEFAULT_FLAG:
+if DEFAULT_BRANCH_FLAG:
     url = f"https://api.github.com/repos/{owner}/{repo}"
     response = requests.get(url)
     if response.status_code == 200:
         branch = response.json()['default_branch']
     else:
-        print('Error')
+        sys.exit("Invalid Repo Name or Owner")
 
 #Getting SHA for the branch of this repo
 url = f"https://api.github.com/repos/{owner}/{repo}/branches/{branch}"
@@ -91,7 +139,7 @@ response = requests.get(url)
 if response.status_code == 200:
     sha = response.json()["commit"]["sha"]
 else:
-    print("Error")
+    sys.exit("Invalid Repo Name, Owner or Branch")
 
 #Getting the git tree for the branch of this repo
 url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{sha}?recursive=1"
@@ -99,7 +147,7 @@ response = requests.get(url)
 if response.status_code == 200:
     repo_tree_json = response.json()['tree']
 else:
-    print("Error")
+    sys.exit("Unable to Obtain Git Tree")
 
 
 #Making Repo Tree
@@ -163,9 +211,8 @@ while folder_stack_2:
     file_url_list = []
     for file in file_list:
         file_path = ref_tree[file]
-        content_url = f"https://raw.githubusercontent.com/{owner}/{repo}/2nd-ed/{file_path}"
-        # content_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{file_path}"
-        file_path_list.append(file_path + ":\n\n")
+        content_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{file_path}"
+        file_path_list.append(file_path + " Contents:\n\n")
         file_url_list.append(content_url)
     #get file contents
     file_content_list = asyncio.run(fetch_files(file_url_list))
@@ -179,78 +226,3 @@ while folder_stack_2:
         folder_stack_2.append(("/".join(f_tree_copy), f_tree_copy))
 
 print(output_text)
-
-
-#for private repos, use github API
-#for public repos use raw github
-
-#Next steps: #exception and error handling
-#make it a CLI that can accept arguments etc.
-#maybe ignore all video and image files for now
-#then do the handlers for the markdown and ipynb file types
-    #ipynb is essentially json
-    #ipynb images are in png converted to base64 (need to convert back)
-#handle private repos
-#testing
-
-
-#TO IMPLEMENT
-
-#specify which branch
-#if branch not specified use default branch:
-#https://api.github.com/repos/{owner}/{repo} and then navigate to "default_branch"
-#of returned JSON
-
-#how to get tree_sha for tree: 
-#https://api.github.com/repos/{owner}/{repo}/branches/{branch_name}
-
-
-#things to implement first:
-#obtain filelist - git tree with github api: https://docs.github.com/en/rest/git/trees?apiVersion=2022-11-28
-#https://api.github.com/repos/{owner}/{repo}/git/trees/{sha}?recursive=1
-#use a BFS tree for file/folder list
-#use DFS tree for going through the files and folders
-#sort such that the files come first and the folders later
-
-#exception handling, folder with no files
-
-#notebook handler (as well as notebook images)
-    #notebook images are pngs (need to decode)
-    #notebook is essentially like JSON, need to parse
-#markdown handler (as well as markdown images) (README in particular)
-    #markdown images are linked to assets
-
-#include error handling
-
-
-#BEHAVIOUR
-
-#callable program with arguments
-#e.g. unroll_repo -git link, unroll_repo -git -n(for names) owner repo_name
-#e.g. unroll_repo directory_name (local)
-
-
-
-#FEATURES
-
-#unroll from github
-#unroll from other sites e.g. bitbucket
-#unroll from just a folder list
-
-#option to include images (pngs from notebooks and markdown as well)
-
-#option for accessing private repo
-
-#option for repo and owner or just using a link
-
-#filetypes to ignore (e.g. .lock, .json)
-#file titles to ignore (e.g. license, credits etc)
-
-#option to initialize with your own github key (for private repo maybe?)
-
-
-
-#hoppscotch
-
-
-
